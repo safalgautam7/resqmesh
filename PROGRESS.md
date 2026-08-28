@@ -51,12 +51,12 @@
 - [x] Tests (8+)
 
 ### M4/M5 — Flutter UI (citizen + coordinator)
-- [ ] Get Help form (categories, optional location, people)
-- [ ] My Reports screen
-- [ ] Alerts screen
-- [ ] Coordinator dashboard (role-gated, web)
-- [ ] Coordinator report detail + status/priority actions
-- [ ] E2E manual exit test
+- [x] Get Help form (categories, optional location, people)
+- [x] My Reports screen
+- [x] Alerts screen
+- [x] Coordinator dashboard (role-gated, web)
+- [x] Coordinator report detail + status/priority actions
+- [x] E2E manual exit test
 
 ### M6 — Agent abstraction + Extraction
 - [ ] Provider interface (base/ollama/mock)
@@ -92,6 +92,25 @@
 ---
 
 ## Agent reports (append below, newest last)
+
+## Phase 1 (Day 1) — M0..M5 complete
+## Implemented
+- M0: root git repo, PROGRESS.md, Android SDK env vars, emulator+AVD (resqmesh_avd), docker-compose Postgres, Django project (`backend/config`) with apps pkg, deps (psycopg, cors, simplejwt, environ), `.env`, custom User, Flutter scaffold.
+- M1: JWT auth (register/login/me) with roles, permission helpers.
+- M2: EmergencyReport model+API (ownership + role rules, priority/status).
+- M3: OfficialAlert model+API (expiry via effective_status, NotificationProvider abstraction).
+- M4/M5: Flutter citizen app (Get Help form, My Reports, Alerts) + coordinator dashboard (list/filter, report detail status/priority, create alert), role-gated; runs on Android emulator and web.
+## Files Changed
+- backend/config/*, backend/apps/{accounts,emergencies,alerts,notifications}/*, backend/pyproject.toml, backend/.env(.example), docker-compose.yml, frontend/mobile/{lib,test,pubspec.yaml}, PROGRESS.md, .gitignore
+## Tests Added
+- accounts: 8 · emergencies: 14 · alerts: 10 · flutter widget smoke test: 1
+## Tests Run
+- `manage.py test` -> 32 passed · `flutter test` -> 1 passed · `flutter analyze` -> clean · `flutter build apk --debug` -> OK · app launches on emulator
+## Result
+PASS
+## Notes
+- Backend HTTP flow verified: citizen register/login/report; coordinator login/view/patch/create alert; citizen sees alert, denied alert create + priority change.
+- Emulator + backend run detached. Backend dev server: `manage.py runserver 0.0.0.0:8000`.
 
 <!-- Format:
 ## M<x> — <short task>
