@@ -47,6 +47,29 @@ class EmergencyReportSerializer(serializers.ModelSerializer):
         return validate_coordinates(attrs)
 
 
+class AgentAnalysisSerializer(serializers.Serializer):
+    extraction = serializers.JSONField()
+    uncertainty = serializers.JSONField()
+    priority = serializers.JSONField()
+    duplicate = serializers.JSONField()
+    provider = serializers.CharField()
+    model = serializers.CharField()
+    is_available = serializers.BooleanField()
+    suggested_priority = serializers.SerializerMethodField()
+
+    def get_suggested_priority(self, obj):
+        return obj.priority.get("suggested_priority")
+
+
+class EmergencyReportDetailSerializer(EmergencyReportSerializer):
+    """Detail view: includes the AI agent analysis for coordinator review."""
+
+    analysis = AgentAnalysisSerializer(read_only=True)
+
+    class Meta(EmergencyReportSerializer.Meta):
+        fields = EmergencyReportSerializer.Meta.fields + ("analysis",)
+
+
 class CoordinatorReportSerializer(EmergencyReportSerializer):
     """Coordinator view: allows mutating operational status and priority."""
 

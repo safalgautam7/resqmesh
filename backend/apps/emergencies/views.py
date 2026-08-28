@@ -4,6 +4,7 @@ from .models import EmergencyReport
 from .permissions import IsReporterOrCoordinator
 from .serializers import (
     CoordinatorReportSerializer,
+    EmergencyReportDetailSerializer,
     EmergencyReportSerializer,
 )
 from .services import create_emergency_report
@@ -27,6 +28,8 @@ class EmergencyReportViewSet(
 
     def get_serializer_class(self):
         if self.request.user.is_coordinator:
+            if self.action in {"retrieve"}:
+                return EmergencyReportDetailSerializer
             return CoordinatorReportSerializer
         return EmergencyReportSerializer
 

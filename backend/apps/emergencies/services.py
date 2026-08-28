@@ -1,4 +1,6 @@
 from django.db import transaction
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 from .models import EmergencyReport, Priority, ReportStatus
 
@@ -19,9 +21,29 @@ def create_emergency_report(*, reporter, description, incident_type, latitude=No
             location_accuracy=location_accuracy,
             people_affected=people_affected,
         )
-    # Stage 2 will invoke the agent workflow here; for now the report is
-    # stored even if any asynchronously-triggered analysis fails.
+    # The AI agent workflow is triggered after save (see receiver below). The
+    # report is stored even if analysis fails or is slow.
     return report
+
+
+@receiver(post_save, sender=EmergencyReport, dispatch_uid="run_agent_analysis")
+def _run_agent_analysis(sender, instance, created, **kwargs):
+    """Invoke the multi-agent pipeline right after a report is first created.
+
+    Wrapped so an AI/provider failure can never prevent the report from being
+    saved or returned to the reporter. The coordinator can retry via the admin
+    or a management command if needed.
+    """
+    if not created:
+        return
+    from apps.agents.services import analyze_report
+
+    try:
+        analyze_report(instance)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("agent analysis failed for report %s", instance.pk)
 
 
 def update_report_operational(*, report, status=None, priority=None):
