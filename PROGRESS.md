@@ -74,7 +74,7 @@
 - [x] Metrics recorded via `evaluate_agents` command + agent report
 
 ### M9 — Human review + AI failure handling
-- [ ] Coordinator Accept/Modify UI (analysis exposed via detail API)
+- [x] Coordinator Accept/Modify UI (AI suggestion panel + Accept on report detail)
 - [x] AI failure does not break reporting
 - [x] Original report preserved test
 
@@ -130,6 +130,21 @@ PASS
 ## Notes
 - Real model pull target `qwen2.5:1b` failed in this environment (registry "file does not exist"); used local `qwen2.5-coder:1.5b` instead (configurable via AI_MODEL).
 - EVALUATION FINDING: local 1.5B model matches mock on extraction/people but is noisy + under-triages priority (non-deterministic run-to-run). Safety floor bounds the worst under-triage. Conclusion: mock is the reliable safe default for triage in this env; LLM adds free-text extraction value, needs a stronger model for nuanced priority. Mock pipeline beats baseline by +0.5 priority accuracy at 0 risk.
+
+## Phase 2 (Day 2) — M9 complete
+## Implemented
+- Coordinator report-detail screen now loads the full report via `GET /emergencies/{id}/` and renders an "AI SUGGESTION" panel: suggested priority (colored), incident type, uncertainty score/level, rationale, provider. "Accept suggested priority" button applies it via the existing PATCH (modify remains via status/priority chips).
+- Added `getReportDetail` to ApiService, `AgentAnalysis` Flutter model, `EmergencyReport.fromJsonDetail`.
+## Files Changed
+- frontend/mobile/lib/models/{agent_analysis,emergency_report}.dart, lib/services/api_service.dart, lib/screens/coordinator/report_detail_screen.dart
+## Tests Added
+- N/A (UI). Backend detail/serializer covered in agents tests.
+## Tests Run
+- `flutter analyze` -> clean · `flutter test` -> 1 passed · E2E API: report create -> detail has analysis (extraction/uncertainty/priority, suggested CRITICAL, provider mock) -> coordinator PATCH applies CRITICAL -> citizen PATCH denied (stays CRITICAL) -> original report preserved (priority UNASSIGNED until accept).
+## Result
+PASS
+## Notes
+- Backend dev server restarted (--noreload) to pick up Stage 2 code; post_save agent analysis runs on each new report.
 
 <!-- Format:
 ## M<x> — <short task>

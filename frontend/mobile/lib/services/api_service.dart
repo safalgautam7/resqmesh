@@ -97,8 +97,14 @@ class ApiService {
         .toList();
   }
 
-  Future<EmergencyReport> createReport(EmergencyReport report) async {
-    final resp = await _client.post(
+  Future<EmergencyReport> getReportDetail(int id) async {
+    final resp = await _client.get(_uri('/emergencies/$id/'), headers: _headers);
+    if (resp.statusCode != 200) _throw(resp);
+    return EmergencyReport.fromJsonDetail(
+        jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  Future<EmergencyReport> createReport(EmergencyReport report) async {    final resp = await _client.post(
       _uri('/emergencies/'),
       headers: _headers,
       body: jsonEncode(report.toCreatePayload()),

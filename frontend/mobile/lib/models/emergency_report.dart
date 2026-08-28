@@ -1,3 +1,5 @@
+import 'agent_analysis.dart';
+
 class EmergencyReport {
   final int id;
   final int reporter;
@@ -11,6 +13,7 @@ class EmergencyReport {
   final String priority;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final AgentAnalysis? analysis;
 
   EmergencyReport({
     required this.id,
@@ -25,6 +28,7 @@ class EmergencyReport {
     required this.priority,
     required this.createdAt,
     required this.updatedAt,
+    this.analysis,
   });
 
   factory EmergencyReport.fromJson(Map<String, dynamic> json) => EmergencyReport(
@@ -41,6 +45,27 @@ class EmergencyReport {
         createdAt: DateTime.parse(json['created_at'] as String),
         updatedAt: DateTime.parse(json['updated_at'] as String),
       );
+
+  factory EmergencyReport.fromJsonDetail(Map<String, dynamic> json) {
+    final base = EmergencyReport.fromJson(json);
+    return EmergencyReport(
+      id: base.id,
+      reporter: base.reporter,
+      reporterName: base.reporterName,
+      description: base.description,
+      incidentType: base.incidentType,
+      latitude: base.latitude,
+      longitude: base.longitude,
+      peopleAffected: base.peopleAffected,
+      status: base.status,
+      priority: base.priority,
+      createdAt: base.createdAt,
+      updatedAt: base.updatedAt,
+      analysis: (json['analysis'] as Map?) == null
+          ? null
+          : AgentAnalysis.fromJson((json['analysis'] as Map).cast<String, dynamic>()),
+    );
+  }
 
   Map<String, dynamic> toCreatePayload() => {
         'description': description,

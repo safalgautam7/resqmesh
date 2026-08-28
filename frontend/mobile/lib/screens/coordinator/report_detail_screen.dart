@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/agent_analysis.dart';
 import '../../models/emergency_report.dart';
 import '../../services/api_service.dart';
 import '../../services/auth_state.dart';
@@ -33,12 +34,26 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
 
   late EmergencyReport _report;
   bool _saving = false;
+  bool _loading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _report = widget.report;
+    _fetchDetail();
+  }
+
+  Future<void> _fetchDetail() async {
+    try {
+      final detail =
+          await context.read<AuthState>().api.getReportDetail(_report.id);
+      if (mounted) setState(() => _report = detail);
+    } catch (_) {
+      // Detail fetch is best-effort; the base report still renders.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _apply({String? status, String? priority}) async {
@@ -89,6 +104,12 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
             _keyValue('Priority', _report.priority),
             _keyValue('Created',
                 _report.createdAt.toLocal().toString().substring(0, 16)),
+            if (_loading)
+              const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Center(child: CircularProgressIndicator())),
+            if (!_loading && _report.analysis != null)
+              _buildAiPanel(_report.analysis!),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -131,6 +152,73 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildAiPanel(AgentAnalysis analysis) {
+    final suggested = analysis.suggestedPriority;
+    return Card(
+      color: const Color(0xFFF0F6FF),
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF1F6FB2)),
+                const SizedBox(width: 6),
+                const Text('AI SUGGESTION',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const Spacer(),
+                Text('provider: ${analysis.provider}',
+                    style: const TextStyle(color: Colors.grey, fontSize: 11)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _kv('Suggested priority', suggested ?? '—')),
+              Expanded(
+                  child: _kv('Incident', analysis.incidentType)),
+            ]),
+            const SizedBox(height: 6),
+            _kv('Uncertainty', '${analysis.uncertaintyScore} (${analysis.uncertaintyLevel})'),
+            if (analysis.rationale.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('Why: ${analysis.rationale}',
+                  style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+            ],
+            const SizedBox(height: 10),
+            if (suggested != null && suggested != _report.priority)
+              FilledButton.icon(
+                onPressed: _saving
+                    ? null
+                    : () => _acceptSuggestion(suggested),
+                icon: const Icon(Icons.check),
+                label: const Text('Accept suggested priority'),
+              )
+            else
+              const Text('Suggestion already applied.',
+                  style: TextStyle(fontSize: 12, color: Colors.green)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _kv(String k, String v) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(k.toUpperCase(),
+            style: const TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
+        Text(v),
+      ],
+    );
+  }
+
+  Future<void> _acceptSuggestion(String priority) async {
+    await _apply(priority: priority);
   }
 
   Widget _keyValue(String k, String v) {
