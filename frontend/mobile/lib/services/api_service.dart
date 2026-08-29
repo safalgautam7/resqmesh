@@ -6,6 +6,7 @@ import '../core/api_config.dart';
 import '../models/emergency_report.dart';
 import '../models/official_alert.dart';
 import '../models/user.dart';
+import 'relay/relay_envelope.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -159,5 +160,23 @@ class ApiService {
     );
     if (resp.statusCode != 201) _throw(resp);
     return OfficialAlert.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  // ---- Relay (mesh recovery) ----
+  /// Hand a carried relay envelope to the backend. Accepts both the initial
+  /// delivery (201) and a dedup duplicate (200).
+  Future<bool> deliverRelayMessage(RelayEnvelope env) async {
+    final resp = await _client.post(
+      _uri('/relay/messages/'),
+      headers: _headers,
+      body: jsonEncode({
+        'message_id': env.id,
+        'source': env.origin,
+        'hops': env.hops,
+        'max_hops': env.maxHops,
+        'payload': env.payload,
+      }),
+    );
+    return resp.statusCode == 201 || resp.statusCode == 200;
   }
 }

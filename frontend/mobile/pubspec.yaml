@@ -36,6 +36,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   http: ^1.6.0
   provider: ^6.1.5+1
+  flutter_blue_plus: 1.36.8
+  ble_peripheral: ^2.4.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
 
 dev_dependencies:
   flutter_test:

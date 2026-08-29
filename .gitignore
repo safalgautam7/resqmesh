@@ -36,5 +36,8 @@ node_modules/
 .vscode/
 .DS_Store
 
+# Markdown
+*.md
+
 # Evaluation / generated artifacts (keep structure, ignore generated outputs)
 evaluation/results/*.log

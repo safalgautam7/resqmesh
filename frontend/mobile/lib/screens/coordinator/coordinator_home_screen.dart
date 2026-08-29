@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../models/emergency_report.dart';
 import '../../services/auth_state.dart';
 import '../../theme.dart';
+import '../../widgets/relay_status_card.dart';
 import 'create_alert_screen.dart';
 import 'report_detail_screen.dart';
 
@@ -109,6 +110,10 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
           final all = snap.data ?? [];
           return Column(
             children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: RelayStatusCard(),
+              ),
               _SummaryBar(reports: all),
               _FilterBar(
                 statusFilter: _statusFilter,

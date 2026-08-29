@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../../models/emergency_report.dart';
 import '../../services/api_service.dart';
 import '../../services/auth_state.dart';
+import '../../services/relay/relay_envelope.dart';
+import '../../services/relay/relay_manager.dart';
 
 class ReportFormScreen extends StatefulWidget {
   const ReportFormScreen({super.key});
@@ -50,9 +52,9 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       _loading = true;
       _error = null;
     });
+    double? lat;
+    double? lng;
     try {
-      double? lat;
-      double? lng;
       if (_addLocation) {
         lat = double.tryParse(_lat.text);
         lng = double.tryParse(_lng.text);
@@ -87,9 +89,30 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             content: Text('Report submitted. Your ID: RQ-${saved.id}. Help is on the way.')),
       );
     } on ApiException catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.message);
-    } catch (_) {
-      setState(() => _error = 'Could not submit. Is your connection available?');
+    } catch (e) {
+      // The server is unreachable (offline / no signal). Buffer the report in
+      // the on-device outbox; it will be carried through the BLE mesh and
+      // delivered to the backend by the nearest online device.
+      final auth = context.read<AuthState>();
+      final user = auth.currentUser.username;
+      final envelope = RelayEnvelope.report(
+        origin: user,
+        description: _description.text.trim(),
+        incidentType: _incidentType,
+        latitude: lat,
+        longitude: lng,
+        peopleAffected: int.tryParse(_people.text),
+      );
+      context.read<RelayManager>().enqueueOutbox(envelope);
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'No connection — report saved offline. It will sync automatically when a device network link is found.')),
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/auth_state.dart';
+import '../../widgets/relay_status_card.dart';
 import 'report_form_screen.dart';
 
 class CitizenHomeTab extends StatelessWidget {
@@ -31,6 +32,8 @@ class CitizenHomeTab extends StatelessWidget {
             children: [
               Text('Hello, ${user?.username ?? ''}',
                   style: const TextStyle(fontSize: 16, color: Colors.grey)),
+              const SizedBox(height: 16),
+              const RelayStatusCard(),
               const SizedBox(height: 16),
               // Primary emergency action
               Material(
