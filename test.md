@@ -58,23 +58,68 @@ uv run python manage.py runserver 0.0.0.0:8000 --noreload
 - `0.0.0.0` lets the **Android emulator** reach the host via `10.0.2.2`.
 - Health check: open `http://localhost:8000/admin/` or hit any endpoint below.
 
-### 2.3 Frontend (Flutter)
+### 2.3 Frontend (Flutter) + Android emulator
 
 ```bash
 cd frontend/mobile
 flutter pub get
-
-# Android emulator (citizen app)
-flutter emulators --launch resqmesh_avd          # or open your AVD
-flutter run -d <emulator_id>
-
-# Web (coordinator dashboard)
-flutter run -d chrome
 ```
 
 Base URL is platform-aware (`lib/core/api_config.dart`):
-- **Android emulator** → `http://10.0.2.2:8000/api/v1`
+- **Android emulator** → `http://10.0.2.2:8000/api/v1` (reaches the host machine)
 - **Web / iOS simulator** → `http://localhost:8000/api/v1`
+
+#### Start the emulator (Android system image)
+This project uses the `resqmesh_avd` AVD (Android 15 / API 35). To create it the
+first time (only if it doesn’t exist):
+
+```bash
+# list your AVDs
+$ANDROID_HOME/emulator/emulator -list-avds
+# create one if missing (SDK 35 system image must be installed)
+flutter emulators --create --name resqmesh_avd
+```
+
+Launch the AVD directly (more robust than `flutter emulators --launch`):
+
+```bash
+$ANDROID_HOME/emulator/emulator -avd resqmesh_avd -no-snapshot-save -no-boot-anim &
+```
+
+Wait until Android has fully booted (the launcher is responsive):
+
+```bash
+$ANDROID_HOME/platform-tools/adb wait-for-device
+# then poll until this prints "1":
+$ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed
+# list devices — you should see e.g. "emulator-5554   device"
+$ANDROID_HOME/platform-tools/adb devices
+```
+
+Now run the app in debug mode (hot-reloadable) on the emulator:
+
+```bash
+flutter devices                 # get the emulator id (e.g. emulator-5554)
+flutter run -d emulator-5554
+```
+
+Or, if you prefer the pre-built APK without the Flutter toolchain attached:
+
+```bash
+flutter build apk --debug
+$ANDROID_HOME/platform-tools/adb install -r build/app/outputs/flutter-apk/app-debug.apk
+$ANDROID_HOME/platform-tools/adb shell monkey -p com.resqmesh.resqmesh \
+    -c android.intent.category.LAUNCHER 1
+```
+
+> **Before you test on device, make sure the backend is running** on the host:
+> `uv run python manage.py runserver 0.0.0.0:8000 --noreload` (from `backend/`).
+> The emulator reaches it via `10.0.2.2`.
+
+#### Web (coordinator dashboard)
+```bash
+flutter run -d chrome
+```
 
 ---
 
@@ -229,17 +274,41 @@ curl -s -X PATCH $BASE/alerts/1/ -H "Authorization: Bearer $COORD" -H "$J" \
 ## 5. Testing via the Flutter frontend
 
 The app has two role-gated fronts from one codebase:
-- **Citizen app** → Android emulator.
-- **Coordinator dashboard** → Chrome (web).
+- **Citizen app** → runs on the **Android emulator** (`resqmesh_avd`).
+- **Coordinator dashboard** → best on **Chrome (web)**; it also runs on the
+  emulator but the web build is quicker for the coordinator role.
+
+For **both** targets the backend must be running on the host:
+`uv run python manage.py runserver 0.0.0.0:8000 --noreload` (from `backend/`).
 
 ### 5.1 Citizen app (Android emulator)
 
-1. Launch the app (Section 2.3). You land on the **Login** screen.
-2. **Login** as `smokecit / strongpass123`, or tap **Register** to create a new citizen.
-3. **Get Help / report form** — fill description, pick an incident type, optionally
-   add people count, and submit. A new report is created (you'll see it on **My Reports**).
-4. **My Reports** — your submitted reports list.
-5. **Alerts** — see current **active** official alerts published by coordinators.
+This is the end-to-end mobile flow on the emulator:
+
+1. **Boot & install** (Section 2.3). The app should already be installed and
+   launched on `emulator-5554`. If not:
+   ```bash
+   $ANDROID_HOME/platform-tools/adb install -r \
+       frontend/mobile/build/app/outputs/flutter-apk/app-debug.apk
+   $ANDROID_HOME/platform-tools/adb shell monkey -p com.resqmesh.resqmesh \
+       -c android.intent.category.LAUNCHER 1
+   ```
+   Verify the app is alive and in the foreground:
+   ```bash
+   $ANDROID_HOME/platform-tools/adb shell pidof com.resqmesh.resqmesh   # prints a PID
+   $ANDROID_HOME/platform-tools/adb shell dumpsys activity activities \
+       | grep -i resqmesh                                             # shows .MainActivity visible=true
+   ```
+2. You land on the **Login** screen.
+3. **Login** as `smokecit / strongpass123`, **or tap Register** to create a new citizen.
+4. **Get Help** (report form) — enter a description, pick an incident type, add a
+   people count, submit. The report is created on the backend (see it on **My Reports**).
+5. **My Reports** — your submitted reports.
+6. **Alerts** — see the **active** official alerts that a coordinator published.
+
+To see the **AI side effect** of a citizen report, log in as the coordinator in
+another window (Section 5.2) and open the report you just created — the AI
+SUGGESTION panel will show the agent analysis for it.
 
 ### 5.2 Coordinator dashboard (Chrome web)
 
@@ -248,7 +317,13 @@ The app has two role-gated fronts from one codebase:
 3. **Open a report** → the **AI SUGGESTION** panel shows the agent’s suggested
    priority / incident / uncertainty / rationale. Tap **Accept suggested priority**
    to apply it, or use the **Change Status** / **Change Priority** chips.
-4. **Create Alert** — publish an official alert (citizens will see it if active).
+4. **Create Alert** — publish an official alert (citizens on the emulator will see
+   it in the **Alerts** screen when it is active).
+
+> Tip: to watch the whole multi-user flow live, run the **citizen app on the
+> emulator** and the **coordinator on Chrome** at the same time, side by side:
+> citizen submits → coordinator sees it with AI analysis → coordinator accepts
+> priority → citizen can verify the alert appeared.
 
 ---
 
@@ -282,13 +357,35 @@ OLLAMA_URL=http://localhost:11434
 
 ```bash
 cd backend
-uv run python manage.py test            # 51 tests (auth, reports, alerts, agents, evaluation)
+uv run python manage.py test            # 59 tests (auth, reports, alerts, agents, relay)
 uv run python manage.py check           # system checks
 
 cd frontend/mobile
 flutter analyze                         # static analysis (expect no issues)
 flutter test                            # widget smoke test
 flutter build apk --debug               # build the installable app
+```
+
+### Offline / relay testing (Stage 3)
+
+```bash
+cd backend
+uv run python manage.py test apps.relay            # the 8 relay scenario tests
+
+# Run the store-carry-forward demo:  A(offline) -> B -> C -> Django
+uv run python manage.py relay_demo
+```
+
+Expected `relay_demo` output (roughly):
+
+```text
+Device A (OFFLINE) creates a report -> held in local outbox.
+  message_id=141b305f... synced_to_server=False
+A meets B -> exchange           -> B now has 1
+B meets C -> exchange           -> C now has 1
+C regains connectivity -> delivers to Django backend
+  relay message synced_to_server=True status=DELIVERED
+  Django now holds EmergencyReport #N (...)
 ```
 
 ---
@@ -300,6 +397,10 @@ flutter build apk --debug               # build the installable app
 | `OperationalError` / DB connection refused | Ensure `docker compose up -d db` is running and healthy. |
 | `ModuleNotFoundError: requests` | Run `cd backend && uv sync` (adds `requests`). |
 | App can’t reach server on Android | Server must bind `0.0.0.0`; emulator uses `10.0.2.2:8000`. Restart runserver. |
+| Emulator not booting / frozen | Relaunch with `-no-snapshot-save -no-boot-anim`; disk can be slow on first boot. |
+| `adb: no devices` / offline | Start the emulator first, then run `adb wait-for-device`; `adb devices` should list `emulator-5554`. |
+| AVD missing | `flutter emulators --create --name resqmesh_avd` (needs the API 35 system image installed). |
+| APK install says `INSTALL_FAILED` | Use `adb install -r` (replace). |
 | Changes not visible in API | Dev server runs `--noreload`; restart it after backend edits. |
 | Ollama calls time out / unparseable | Ensure Ollama is running (`ollama serve`) and the model is pulled (`ollama list`). |
 | Citizens creating alerts | That’s the expected **403** — coordinators only. |
