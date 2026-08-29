@@ -79,16 +79,17 @@
 - [x] Original report preserved test
 
 ### M10 — Local outbox
-- [ ] Outbox model + connectivity detection
+- [x] Outbox model + connectivity detection (`RelayMessage` delivery_state, `RelayDevice` online, `connectivity.NodeState`)
 
 ### M11 — Store-carry-forward
-- [ ] Inventory exchange + missing-message sync service
+- [x] Inventory exchange + missing-message sync service (`DeviceStore`, `exchange`, `recover_to_backend`)
 
 ### M12 — Relay rules
-- [ ] Dedup, TTL/expiry, hop limits
+- [x] Dedup (global unique `message_id`), TTL/expiry, hop limits (`is_expired`/`max_hops`)
 
 ### M13 — Stage 3 E2E + tests
-- [ ] 7 relay tests (offline save, recovery, direct relay, multi-hop, duplicate, expiration, full recovery)
+- [x] 7 relay tests (offline save, single-device recovery, direct relay, multi-hop, duplicate, expiration, full recovery)
+- [x] `relay_demo` command (A -> B -> C -> Django recovery demonstration)
 
 ---
 
@@ -145,6 +146,23 @@ PASS
 PASS
 ## Notes
 - Backend dev server restarted (--noreload) to pick up Stage 2 code; post_save agent analysis runs on each new report.
+
+## Phase 3 (Day 3) — M10..M13 complete
+## Implemented
+- M10: `apps/relay` app. `RelayMessage` (global unique `message_id`, payload, `expires_at` TTL, `hop_count`/`max_hops`, `delivery_status`, `synced_to_server`) + `RelayDevice` (online flag, carried_messages M2M) models; `connectivity.py` (NodeState online/offline + `should_buffer_message`).
+- M11: `DeviceStore` (per-device virtual node) with `exchange()` two-way inventory sync + `recover_to_backend()`; a relayed payload is materialized as a real `EmergencyReport` on delivery.
+- M12: relay rules — dedup (unique `message_id`, set-based presence), TTL (`is_expired` -> not relayed), hop limit (`hop_count >= max_hops` -> stop).
+- M13: `apps/relay/tests.py` (7+ scenario tests) + `manage.py relay_demo` printing the full recovery loop.
+## Files Changed
+- backend/apps/relay/* (models, services, connectivity, admin, migration 0001, management/commands/relay_demo), backend/config/settings.py (+apps.relay)
+## Tests Added
+- relay: 8 (offline save, single-device recovery, direct relay, multi-hop, duplicate, expiration, full recovery, hop-limit). Total backend 59.
+## Tests Run
+- `manage.py test` -> 59 passed · `manage.py relay_demo` -> A(offline) create -> A->B -> B->C -> C online -> Django receives EmergencyReport #4.
+## Result
+PASS
+## Notes
+- Stage 3 modelled with in-process virtual relay nodes (per plan) + persistent `carried_by` M2M; physical Bluetooth transport is a later swap-in behind the same services. DB container was restarted during this phase (docker compose up -d db).
 
 <!-- Format:
 ## M<x> — <short task>
