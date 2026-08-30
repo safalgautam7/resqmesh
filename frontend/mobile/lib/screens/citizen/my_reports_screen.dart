@@ -20,10 +20,9 @@ class MyReportsScreen extends StatefulWidget {
 class _MyReportsScreenState extends State<MyReportsScreen> {
   late Future<List<EmergencyReport>> _future;
 
-  /// True while a delete request is in flight; shows a blocking "Deleting…"
-  /// overlay over the list. Kept as plain state (NOT a route) so we never race
-  /// the Navigator/overlay when the request completes.
-  bool _deleting = false;
+  /// True while a user-tapped refresh is in flight (shows a spinner on the
+  /// AppBar refresh button).
+  bool _refreshing = false;
 
   @override
   void initState() {
@@ -45,7 +44,28 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
   }
 
   void _reload() {
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load();
+    });
+  }
+
+  /// User-tapped refresh: refetch the latest list and show a spinner on the
+  /// button while it runs.
+  Future<void> _manualRefresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      final fresh = await context.read<AuthState>().api.getReports();
+      if (mounted) {
+        setState(() {
+          _future = Future.value(fresh);
+        });
+      }
+    } catch (_) {
+      // Keep the current (possibly offline) state visible.
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   Future<void> _delete(EmergencyReport report) async {
@@ -72,18 +92,15 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
       ),
     );
     if (confirmed != true) return;
-    setState(() => _deleting = true);
     try {
       await api.deleteReport(report.id);
       if (!mounted) return;
-      _deleting = false;
       _reload();
       messenger.showSnackBar(
         SnackBar(content: Text('RQ-${report.id} deleted.')),
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      _deleting = false;
       // The report is already gone on the server (e.g. deleted earlier) —
       // treat that as success and just refresh rather than alarming the user.
       if (e.statusCode == 404) {
@@ -101,7 +118,6 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
       // Refresh so the list reflects whatever actually happened, and let the
       // user know rather than wrongly claiming "no connection".
       if (!mounted) return;
-      _deleting = false;
       _reload();
       messenger.showSnackBar(
         const SnackBar(content: Text('Delete sent — list refreshed.')),
@@ -112,10 +128,23 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My Reports')),
-      body: Stack(
-        children: [
-          FutureBuilder<List<EmergencyReport>>(
+      appBar: AppBar(
+        title: const Text('My Reports'),
+        actions: [
+          IconButton(
+            icon: _refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            tooltip: 'Refresh reports from server',
+            onPressed: _refreshing ? null : _manualRefresh,
+          ),
+        ],
+      ),
+      body: FutureBuilder<List<EmergencyReport>>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -161,40 +190,6 @@ class _MyReportsScreenState extends State<MyReportsScreen> {
             ),
           );
         },
-          ),
-          if (_deleting)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black38,
-                child: Center(
-                  child: Card(
-                    margin: const EdgeInsets.all(32),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2.5),
-                          ),
-                          const SizedBox(width: 16),
-                          Flexible(
-                            child: Text(
-                              'Deleting…\nIt may take a moment for this change '
-                              'to reflect in your list.',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }

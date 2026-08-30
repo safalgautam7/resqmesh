@@ -25,7 +25,11 @@ class _AlertsScreenState extends State<AlertsScreen> {
   Future<List<OfficialAlert>> _load() =>
       context.read<AuthState>().api.getAlerts();
 
-  void _reload() => setState(() => _future = _load());
+  void _reload() {
+    setState(() {
+      _future = _load();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

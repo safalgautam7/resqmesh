@@ -23,6 +23,17 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
   String? _statusFilter;
   String? _priorityFilter;
 
+  /// Last successfully-loaded reports. Kept so that when the backend is down
+  /// we can STILL show the rescuer the reports already on their screen (plus
+  /// the mesh/relay status card) instead of wiping the dashboard with a
+  /// full-screen "no connection" error. Mesh-carried reports keep arriving via
+  /// BLE and stay visible even offline.
+  List<EmergencyReport> _lastReports = const [];
+
+  /// True when the most recent fetch failed (backend unreachable) — surfaced
+  /// as a slim banner above the still-visible (cached) list.
+  bool _offline = false;
+
   /// Keeps the dashboard fresh so reports created/deleted on other devices
   /// (e.g. a citizen deleting their report) show up without a manual pull.
   static const _refreshEvery = Duration(seconds: 15);
@@ -62,12 +73,35 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
     super.dispose();
   }
 
-  Future<List<EmergencyReport>> _load() =>
-      context.read<AuthState>().api.getReports();
+  /// Fetch the list and refresh the cached copy + offline flag on completion.
+  Future<List<EmergencyReport>> _load() async {
+    try {
+      final reports = await context.read<AuthState>().api.getReports();
+      if (mounted) {
+        setState(() {
+          _lastReports = reports;
+          _offline = false;
+        });
+      }
+      return reports;
+    } catch (_) {
+      // Keep the last-known-good list; mark us offline so the UI shows a banner
+      // (and the RefreshIndicator/Retry can attempt again).
+      if (mounted) {
+        setState(() {
+          _lastReports = List.of(_lastReports);
+          _offline = true;
+        });
+      }
+      rethrow;
+    }
+  }
 
   void _reload() {
     if (!mounted) return;
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load();
+    });
   }
 
   /// User-tapped refresh: fetch the latest list from the DB and show a spinner
@@ -77,9 +111,16 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
     setState(() => _refreshing = true);
     try {
       final fresh = await context.read<AuthState>().api.getReports();
-      if (mounted) setState(() => _future = Future.value(fresh));
+      if (mounted) {
+        setState(() {
+          _lastReports = fresh;
+          _offline = false;
+          _future = Future.value(fresh);
+        });
+      }
     } catch (_) {
-      // Keep the current (possibly offline) state visible; nothing else to do.
+      // Backend down — keep the cached list visible and mark offline.
+      if (mounted) setState(() => _offline = true);
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
@@ -128,46 +169,82 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
       body: FutureBuilder<List<EmergencyReport>>(
         future: _future,
         builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
+          // While the very first load is still in flight, show a spinner.
+          if (snap.connectionState != ConnectionState.done &&
+              _lastReports.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
+
+          // A failed fetch: keep the last-known list + relay/summary visible
+          // (rescuer must still see mesh-carried reports), and show a slim
+          // offline banner instead of wiping the whole screen.
           if (snap.hasError) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(isNetworkError(snap.error)
-                      ? Icons.cloud_off
-                      : Icons.error_outline),
-                  const SizedBox(height: 12),
-                  const Text('No connection to the server'),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Reports carried by the mesh will still reach the server '
-                    'when the connection returns.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                      onPressed: _reload, child: const Text('Retry')),
-                ],
-              ),
-            );
+            if (_lastReports.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(isNetworkError(snap.error)
+                        ? Icons.cloud_off
+                        : Icons.error_outline),
+                    const SizedBox(height: 12),
+                    const Text('No connection to the server'),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Reports carried by the mesh will still reach the server '
+                      'when the connection returns.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                        onPressed: _reload, child: const Text('Retry')),
+                  ],
+                ),
+              );
+            }
           }
-          var reports = snap.data ?? [];
-          if (_statusFilter != null) {
-            reports = reports
-                .where((r) => r.status == _statusFilter)
-                .toList();
-          }
+
+          final all = snap.hasError ? _lastReports : (snap.data ?? _lastReports);
+          var reports = _statusFilter == null
+              ? all
+              : all.where((r) => r.status == _statusFilter).toList();
           if (_priorityFilter != null) {
             reports =
                 reports.where((r) => r.priority == _priorityFilter).toList();
           }
-          final all = snap.data ?? [];
+
           return Column(
             children: [
+              if (snap.hasError || _offline)
+                Material(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.cloud_off,
+                            size: 18,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Offline — showing latest synced reports. '
+                            'New mesh reports will appear as they arrive.',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _reload,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               const Padding(
                 padding: EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: RelayStatusCard(),
