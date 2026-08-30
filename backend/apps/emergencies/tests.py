@@ -158,3 +158,54 @@ class EmergencyReportTests(APITestCase):
         resp = self.client.post(self.list_url, self._create(), format="json")
         self.assertIsNotNone(resp.data["created_at"])
         self.assertIsNotNone(resp.data["updated_at"])
+
+
+class EmergencyReportDeleteTests(APITestCase):
+    def setUp(self):
+        self.citizen = User.objects.create_user(username="owner", password="pass12345")
+        self.other = User.objects.create_user(username="other", password="pass12345")
+        self.coordinator = User.objects.create_user(
+            username="coord", password="pass12345", role="COORDINATOR"
+        )
+        self.admin = User.objects.create_user(
+            username="root", password="pass12345", role="ADMIN", is_staff=True, is_superuser=True
+        )
+        self.list_url = reverse("emergency-list")
+
+    def make(self, reporter):
+        return EmergencyReport.objects.create(reporter=reporter, description="x", incident_type="FIRE")
+
+    def delete(self, user, report):
+        self.client.force_authenticate(user=user)
+        return self.client.delete(reverse("emergency-detail", args=[report.id]))
+
+    def test_sender_can_delete_own_report(self):
+        r = self.make(self.citizen)
+        resp = self.delete(self.citizen, r)
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(EmergencyReport.objects.filter(id=r.id).exists())
+
+    def test_sender_can_delete_even_after_resolved(self):
+        r = self.make(self.citizen)
+        r.status = "RESOLVED"
+        r.save(update_fields=["status"])
+        resp = self.delete(self.citizen, r)
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_normal_coordinator_cannot_delete(self):
+        r = self.make(self.citizen)
+        resp = self.delete(self.coordinator, r)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(EmergencyReport.objects.filter(id=r.id).exists())
+
+    def test_admin_can_delete(self):
+        r = self.make(self.citizen)
+        resp = self.delete(self.admin, r)
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_other_citizen_cannot_delete(self):
+        r = self.make(self.citizen)
+        # A foreign citizen cannot delete (404: reports are filtered by owner).
+        resp = self.delete(self.other, r)
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(EmergencyReport.objects.filter(id=r.id).exists())

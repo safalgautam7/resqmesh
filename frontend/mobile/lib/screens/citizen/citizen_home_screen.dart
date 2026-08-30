@@ -19,10 +19,12 @@ class _CitizenHomeScreenState extends State<CitizenHomeScreen> {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: const [
-          CitizenHomeTab(),
-          MyReportsScreen(),
-          AlertsScreen(),
+        children: [
+          const CitizenHomeTab(),
+          // Reload each time the tab becomes active so an offline report that
+          // was later delivered shows up in "My Reports" without a manual pull.
+          MyReportsScreen(isActive: _index == 1),
+          const AlertsScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

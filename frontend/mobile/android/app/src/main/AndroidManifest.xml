@@ -6,6 +6,9 @@
         android:usesPermissionFlags="neverForLocation"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
+    <!-- Automatic GPS location capture for emergency reports -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
     <application
         android:label="resqmesh"

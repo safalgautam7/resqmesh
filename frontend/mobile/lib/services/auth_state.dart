@@ -8,9 +8,11 @@ class AuthState extends ChangeNotifier {
   final ApiService api;
 
   bool _isAuthenticated = false;
+  bool _ready = false;
   User? _user;
 
   bool get isAuthenticated => _isAuthenticated;
+  bool get ready => _ready;
   User? get user => _user;
 
   User get currentUser {
@@ -19,9 +21,29 @@ class AuthState extends ChangeNotifier {
     return u;
   }
 
+  /// Called once at startup: reload a persisted token, then validate it via
+  /// `/me`. Sets [ready] so the UI can render either the app or the login
+  /// screen after the restore attempt.
+  Future<void> restoreSession() async {
+    try {
+      await api.init();
+      if (api.hasToken) {
+        try {
+          _user = await api.me();
+          _isAuthenticated = true;
+        } catch (_) {
+          await api.setToken(null); // stale/expired token — start fresh
+        }
+      }
+    } finally {
+      _ready = true;
+      notifyListeners();
+    }
+  }
+
   Future<void> login(String username, String password) async {
     final tokens = await api.login(username, password);
-    api.setToken(tokens.access);
+    await api.setToken(tokens.access);
     _user = await api.me();
     _isAuthenticated = true;
     notifyListeners();
@@ -33,18 +55,8 @@ class AuthState extends ChangeNotifier {
     await login(username, password);
   }
 
-  Future<void> bootstrap() async {
-    if (!_isAuthenticated) return;
-    try {
-      _user = await api.me();
-      notifyListeners();
-    } catch (_) {
-      await logout();
-    }
-  }
-
   Future<void> logout() async {
-    api.setToken(null);
+    await api.setToken(null);
     _isAuthenticated = false;
     _user = null;
     notifyListeners();

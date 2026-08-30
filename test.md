@@ -132,6 +132,12 @@ flutter run -d chrome
 
 ### 2.4 Launch TWO emulators (full-app presentation / Phase 3 relay demo)
 
+> **Where to run these commands:** from the **repo root**
+> (`cd ~/Desktop/codes/mi_hackathon`). The `APK=` path below is relative to the
+> repo root; if you're inside `frontend/mobile/` instead, use
+> `APK=build/app/outputs/flutter-apk/app-debug.apk`.
+> `$ANDROID_HOME` is normally `~/Android/Sdk`.
+
 Two AVDs exist for this project:
 
 | AVD | Port | Role |
@@ -159,12 +165,12 @@ for d in emulator-5554 emulator-5556; do
 done
 ```
 
-Install the same debug APK on both and grant the BLE permissions (the app
-never shows a runtime permission dialog — grants are pre-provisioned with
-`pm grant`):
+Install the same debug APK on both and pre-grant the BLE permissions:
 
 ```bash
+# APK path is repo-root-relative; from frontend/mobile/ use the line below:
 APK=frontend/mobile/build/app/outputs/flutter-apk/app-debug.apk
+# APK=build/app/outputs/flutter-apk/app-debug.apk
 ADB=$ANDROID_HOME/platform-tools/adb
 for d in emulator-5554 emulator-5556; do
   $ADB -s $d install -r "$APK"
@@ -175,11 +181,108 @@ for d in emulator-5554 emulator-5556; do
 done
 ```
 
-> **Pairing prompt:** when the devices first connect over BLE, a system dialog
-> "Pair with `AA:BB:…`? / Bluetooth pairing code …" appears. Tap **Pair** (keep
-> "Also allow access to contacts and call history" **unchecked**). Because each
-> BLE connection uses a fresh random address, the dialog may re-appear for new
-> connections — it never blocks the background relay.
+**Why the app never shows a permission dialog:** the `pm grant` lines
+pre-approve the three `BLUETOOTH_*` runtime permissions. Grants last until you
+uninstall/reinstall the app — re-run them after any reinstall.
+
+### 2.5 The pairing dialog — REMOVED in the vendored-bondless build
+
+> **The current build is bondless:** the relay uses a vendored, patched
+> `ble_peripheral` (`frontend/mobile/plugins/ble_peripheral`) that no longer
+> calls `device.createBond()`, so **no OS "Pair with …?" dialog appears** and
+> reports relay fully automatically — even if the sender is unconscious. The
+> hands-free watcher below is **no longer required**, but is kept for anyone
+> running an older APK (or a future re-upstreamed plugin).
+
+*Historical note — older builds:* Android showed a system-level
+"Pair with `AA:BB:…`? / Bluetooth pairing code 348232" dialog on first contact.
+That is *bonding* (link encryption key exchange), **not** an app permission —
+no `pm grant` or manifest setting turns it off; a fresh random address made it
+re-appear each connection.
+
+Options for that older build:
+
+- **Manual** — tap **Pair** each time (keep "Also allow access to contacts and
+  call history" **unchecked**). The dialog never blocks the background relay —
+  it only covers the screen, while the relay keeps working behind it.
+- **Hands-free (recommended for demos)** — run this watcher in a terminal; it
+  taps **Pair** the moment a pairing dialog shows, and keeps doing it forever.
+  Start it once **after** both apps are open:
+
+```bash
+ADB=$ANDROID_HOME/platform-tools/adb
+WATCHERS=""
+for d in emulator-5554 emulator-5556; do
+  (
+    while true; do
+      $ADB -s $d shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+      B=$($ADB -s $d shell 'tr "<" "\n<" < /sdcard/ui.xml' 2>/dev/null \
+        | grep -oE '<node[^>]*text="Pair"[^>]*bounds="\[[0-9,]+\]\[[0-9,]+\]"' \
+        | grep -oE '\[[0-9,]+\]\[[0-9,]+\]' | head -1)
+      if [ -n "$B" ]; then
+        B=${B//[/}; B=${B//]/}
+        IFS=, read -r X Y X2 Y2 <<< "$B"
+        $ADB -s $d shell input tap $(( (X+X2)/2 )) $(( (Y+Y2)/2 ))
+      fi
+      sleep 2
+    done
+  ) &
+  WATCHERS="$WATCHERS $!"
+done
+# stop the watchers later with:  kill $WATCHERS
+```
+
+> If a dialog pops on **both** screens at once, the watcher (running for both
+> devices) clears them within ~2 s.
+
+---
+
+### 2.6 Rebuilding & reinstalling the APK after code changes
+
+> **An emulator runs a *snapshot* of the APK that was installed on it.** If you
+> edit frontend code, the running app keeps the old behaviour until you rebuild
+> the APK **and reinstall it** on every emulator. There are two ways to pick up
+> changes:
+
+**Option A — hot reload (best during active editing).** Attach the Flutter
+toolchain and press `r` in the terminal to reload instantly (no rebuild, no
+reinstall):
+
+```bash
+cd frontend/mobile
+flutter run -d emulator-5554     # repeat on emulator-5556 in a 2nd terminal
+# in each terminal, press r to hot-reload after editing Dart code
+```
+
+**Option B — rebuild the debug APK and reinstall (what you run for a finished
+build / final demo).** From the repo root:
+
+```bash
+# 1. Rebuild the debug APK (picks up ALL your Dart + Gradle/plugin changes)
+cd frontend/mobile
+flutter build apk --debug        # -> build/app/outputs/flutter-apk/app-debug.apk
+
+# 2. Reinstall on each emulator (replace the old APK, keeping app data)
+cd ~/Desktop/codes/mi_hackathon  # repo root so the APK path resolves
+APK=frontend/mobile/build/app/outputs/flutter-apk/app-debug.apk
+ADB=$ANDROID_HOME/platform-tools/adb   # $ANDROID_HOME is normally ~/Android/Sdk
+for d in emulator-5554 emulator-5556; do
+  $ADB -s $d install -r "$APK"
+  # 3. Re-grant BLE runtime permissions (grants RESET on every reinstall):
+  $ADB -s $d shell pm grant com.resqmesh.resqmesh android.permission.BLUETOOTH_SCAN
+  $ADB -s $d shell pm grant com.resqmesh.resqmesh android.permission.BLUETOOTH_ADVERTISE
+  $ADB -s $d shell pm grant com.resqmesh.resqmesh android.permission.BLUETOOTH_CONNECT
+  # 4. Launch the app:
+  $ADB -s $d shell monkey -p com.resqmesh.resqmesh -c android.intent.category.LAUNCHER 1
+done
+```
+
+> **Remember to re-grant permissions after every reinstall** — a reinstall is
+> treated as a fresh install, so the `BLUETOOTH_*` grants from §2.4 are wiped
+> and must be re-applied (the `pm grant` lines above do this for you).
+>
+> If you only changed **one** emulator, run the loop body for just that device
+> (e.g. `-s emulator-5554` instead of the `for` loop).
 
 ---
 
@@ -201,6 +304,7 @@ All endpoints are under the prefix **`http://localhost:8000/api/v1`**.
 | POST | `/alerts/` | coordinator only | Create an official alert |
 | GET | `/alerts/{id}/` | authed | Alert detail |
 | PATCH | `/alerts/{id}/` | coordinator only | Update/cancel an alert |
+| DELETE | `/emergencies/{id}/` | sender or admin | Delete a report (204 on success). The **sender** can always delete their own messages; **admins/superusers** can delete anything; a **normal coordinator cannot delete**. |
 | GET | `/relay/messages/` | anyone | Monitor carried envelopes (+ `delivery_status`) |
 | POST | `/relay/messages/` | mesh node | Push a carried envelope (dedup by `message_id`: **201** new / **200** duplicate) |
 
@@ -210,6 +314,7 @@ Role rules to remember:
 - Only coordinators can set `status`/`priority` (citizen writes to these are silently ignored — the original value is preserved).
 - Only coordinators can create/update alerts. Citizens see only **active, non-expired** alerts.
 - Coordinate pairs must be provided together (`latitude` + `longitude`).
+- **Deletion** is owner-or-admin only: the sender may delete their own report; a coordinator who is not an admin gets **403** (and a foreign citizen gets **404**).
 
 ---
 
@@ -268,6 +373,15 @@ curl -s -X POST $BASE/emergencies/ -H "Authorization: Bearer $CIT" -H "$J" \
 
 ```bash
 curl -s $BASE/emergencies/ -H "Authorization: Bearer $CIT"
+```
+
+**Delete a report** (204 — sender deletes their own; normal coordinator gets **403**):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X DELETE $BASE/emergencies/<id>/ \
+  -H "Authorization: Bearer $CIT"        # 204 (sender)
+curl -s -o /dev/null -w "%{http_code}\n" -X DELETE $BASE/emergencies/<id>/ \
+  -H "Authorization: Bearer $COORD"      # 403 (non-admin coordinator)
 ```
 
 **Coordinator lists ALL reports** (200, all):
@@ -364,8 +478,13 @@ This is the end-to-end mobile flow on the emulator:
 2. You land on the **Login** screen.
 3. **Login** as `smokecit / strongpass123`, **or tap Register** to create a new citizen.
 4. **Get Help** (report form) — enter a description, pick an incident type, add a
-   people count, submit. The report is created on the backend (see it on **My Reports**).
-5. **My Reports** — your submitted reports.
+   people count, submit. **Your current GPS position is captured automatically**
+   (a card shows e.g. `27.717198, 85.323998 · GPS location (±5 m) — sent
+   automatically`) — there are no lat/long fields to type. The report is created
+   on the backend (see it on **My Reports**).
+5. **My Reports** — your submitted reports; tap the red trash icon on your own
+   report to **delete** it (only the sender may delete their own; a normal
+   coordinator cannot).
 6. **Alerts** — see the **active** official alerts that a coordinator published.
 
 To see the **AI side effect** of a citizen report, log in as the coordinator in
@@ -388,6 +507,12 @@ SUGGESTION panel will show the agent analysis for it.
 > priority → citizen can verify the alert appeared.
 
 ### 5.3 Offline-mesh (BLE) live demo — Phase 3 highlight
+
+> 📘 **Full walkthrough:** see **`BLUETOOTH_DEMO.md`** for the complete,
+> self-contained guide — when Bluetooth engages, how to boot both emulators
+> from scratch (backend, AVDs, install, grants, login, the bondless/vendor
+> pairing fix), the
+> phases, and how to verify delivery on the web.
 
 Flagship demo: a report is submitted while the backend is **down**; it travels
 **device-to-device over BLE** from the citizen phone to a nearby phone, which
@@ -441,14 +566,22 @@ A report is framed into ≤470-byte chunks (`R1|<id>|<byteOffset>|<total>|<b64>`
 reassembled on the peer into an inbox (Hive `relay_inbox`), and deduplicated by
 `message_id` so double-delivery is harmless (it lands once, `201` then `200`).
 Envelopes carry `max_hops=8` and a 24 h TTL; expired entries are dropped on
-read.
+read. The mesh is **bondless**: a vendored `ble_peripheral` accept the relay
+connection without forcing Android bonding, so no OS pairing dialog appears
+(§2.5).
 
-### 5.4 Coordinator on Chrome (web) — variant
+### 5.4 Coordinator on Chrome (web) — variant 
+#### what works / doesn't work on web
+- Works: citizen report form incl. auto-GPS (geolocator supports web), My Reports + sender-delete, coordinator dashboard, AI triage panel, SAVE CHANGES, create alerts, citizen sees alerts. The app auto-routes by role (main.dart RootGate: coordinator → Dashboard, citizen → Home).
+- Doesn't work on web: the BLE mesh (device-to-device) — that still needs the two emulators. Plugins throw on web but BleTransport.start() catches and logs them, so the online app runs fine; the offline-queue still exists but there's no BLE peer to hand off to over Chrome.
 
-Prefer a device + web mix?
+
 
 ```bash
-flutter run -d chrome    # login as coorddemo / strongpass123
+flutter run -d chrome  --web-port 5000
+flutter run -d chrome  --web-port 5001 
+  # login as coorddemo / strongpass123
+  # login as smokecit / strongpass123
 ```
 
 Everything shown on emulator-5556 (dashboard, filters, AI panel, create alert)
@@ -536,9 +669,11 @@ C regains connectivity -> delivers to Django backend
 | Ollama calls time out / unparseable | Ensure Ollama is running (`ollama serve`) and the model is pulled (`ollama list`). |
 | Citizens creating alerts | That’s the expected **403** — coordinators only. |
 | BLE scan finds nothing / mesh card idle | Both AVDs must be running on the **same host**, Bluetooth ON, and the user logged in (the relay starts only after login). Re-grant all three `BLUETOOTH_*` perms if the APK was reinstalled. |
-| "Pair with …" dialog repeats | Normal — each BLE connection uses a fresh random address. Tap **Pair**; it doesn’t block the relay. |
+| "Pair with …" dialog repeats | Should **not** appear in the vendored-bondless build (see **§2.5**). On an older APK it's normal (fresh random address) — tap **Pair**; it doesn’t block the relay. |
 | Backend edits not visible | Dev server uses `--noreload`; find exact PIDs (`pgrep -af runserver`) and kill those, then restart. Never `pkill -f runserver`. |
 | Card still "0 queued" after an offline report | Read `adb logcat -d | grep -E '\[relay'` for `outbox + <id>`; confirm the backend was actually down (otherwise the report goes straight to the server and never enters the outbox). |
+| Sync now while backend is down shows an error | Fixed — `flush()` no longer throws; the card shows "server unreachable — will retry automatically" and the report stays carried. List screens show a friendly "No connection to the server" state instead of a raw error. |
+| Coordinator cannot delete a report | By design — only the **sender** can delete their own report; admins/superusers can delete any report. A normal coordinator (e.g. `coorddemo`) is not allowed (403). |
 
 ---
 
@@ -552,7 +687,7 @@ running, DB seeded (`smokecit`, `coorddemo`).
 |---|------|------------------|--------------|
 | 1 | 0:00 | "ResQMesh is a multi-user emergency comms platform. Citizens report; coordinators triage; and when the network dies, reports still get through — device to device." | Both emulators side by side, login screens |
 | 2 | 0:20 | Log in `smokecit` (5554) and `coorddemo` (5556). | Home screens; point out the **Offline mesh** card (`mesh active · 0 queued · 0 carried`) |
-| 3 | 0:45 | On 5554: **GET HELP** → describe an incident → **SEND EMERGENCY REPORT**. | Report form → snackbar "Report submitted … RQ-…" |
+| 3 | 0:45 | On 5554: **GET HELP** → describe an incident → **SEND EMERGENCY REPORT**. Point out that **location is captured automatically from GPS** — no lat/long to type (card shows `27.717198, 85.323998 · GPS (±5 m)`). | Report form (location card filled) → snackbar "Report submitted … RQ-…" |
 | 4 | 1:05 | "The same event, from the coordinator’s side." On 5556 open the report → **AI suggestion** panel (extraction + uncertainty + suggested priority + rationale) → **Accept suggested priority** / set status. | Coordinator list → report detail with AI pane |
 | 5 | 1:45 | On 5556: **Create official alert** (e.g. "Flood warning" / HIGH / riverside). On 5554: **Alerts** tab → active alert appears. | Alert creation → citizen Alerts screen |
 | 6 | 2:15 | "Now the headline: what happens when there is NO network?" Stop the backend (`pgrep -af runserver` → `kill <pids>`). | Backend terminal |
@@ -563,5 +698,5 @@ running, DB seeded (`smokecit`, `coorddemo`).
 | 11 | 4:15 | Wrap up: "The same recovery path is behind the **Sync now** button — manual flush on demand. Extendable to multi-hop (max 8)." | Tap **Sync now** |
 | 12 | 4:40 | Q&A. | — |
 
-> If a pairing dialog pops during step 8, tap **Pair** — the relay keeps working
-> behind it.
+> The pairing dialog is auto-removed in the current bondless build — no watcher
+> needed (see **§2.5**). For older APKs the hands-free watcher in §2.5 applies.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/official_alert.dart';
+import '../../services/api_service.dart';
 import '../../services/auth_state.dart';
 import '../../theme.dart';
 
@@ -37,7 +38,20 @@ class _AlertsScreenState extends State<AlertsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snap.hasError) {
-            return Center(child: Text('Could not load alerts\n${snap.error}'));
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(isNetworkError(snap.error)
+                      ? Icons.cloud_off
+                      : Icons.error_outline),
+                  const SizedBox(height: 12),
+                  const Text('No connection to the server'),
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: _reload, child: const Text('Retry')),
+                ],
+              ),
+            );
           }
           final alerts = snap.data ?? [];
           if (alerts.isEmpty) {

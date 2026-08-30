@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/emergency_report.dart';
@@ -27,20 +28,85 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
   String _incidentType = 'OTHER';
   final _description = TextEditingController();
-  bool _addLocation = false;
-  final _lat = TextEditingController();
-  final _lng = TextEditingController();
   final _people = TextEditingController();
   bool _loading = false;
   String? _error;
 
+  // Automatic GPS location (no manual typing — nobody types coordinates in an
+  // emergency).
+  bool _locating = false;
+  bool _locationReady = false;
+  bool _locationDenied = false;
+  double? _lat;
+  double? _lng;
+  double? _accuracy;
+
+  @override
+  void initState() {
+    super.initState();
+    _captureLocation();
+  }
+
   @override
   void dispose() {
     _description.dispose();
-    _lat.dispose();
-    _lng.dispose();
     _people.dispose();
     super.dispose();
+  }
+
+  Future<void> _captureLocation() async {
+    setState(() {
+      _locating = true;
+      _locationDenied = false;
+    });
+    try {
+      var serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() {
+            _locating = false;
+            _locationDenied = true;
+          });
+        }
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() {
+            _locating = false;
+            _locationDenied = true;
+          });
+        }
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          // Fast first fix: a rough position is better than none in an emergency.
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      if (mounted) {
+        setState(() {
+          _lat = pos.latitude;
+          _lng = pos.longitude;
+          _accuracy = pos.accuracy;
+          _locationReady = true;
+          _locating = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _locating = false;
+          _locationDenied = true;
+        });
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -48,24 +114,13 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       setState(() => _error = 'Please describe what happened.');
       return;
     }
+    final lat = _lat;
+    final lng = _lng;
     setState(() {
       _loading = true;
       _error = null;
     });
-    double? lat;
-    double? lng;
     try {
-      if (_addLocation) {
-        lat = double.tryParse(_lat.text);
-        lng = double.tryParse(_lng.text);
-        if (lat == null || lng == null) {
-          setState(() {
-            _loading = false;
-            _error = 'Please enter valid coordinates or turn off location.';
-          });
-          return;
-        }
-      }
       final report = EmergencyReport(
         id: 0,
         reporter: 0,
@@ -164,35 +219,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            SwitchListTile(
-              title: const Text('Add my location'),
-              subtitle: const Text('Helps responders find you (optional)'),
-              value: _addLocation,
-              onChanged: (v) => setState(() => _addLocation = v),
-            ),
-            if (_addLocation) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _lat,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Latitude'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _lng,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Longitude'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            _buildLocationPanel(),
             if (_error != null) ...[
               const SizedBox(height: 16),
               Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -209,6 +236,56 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Automatic location — captured from GPS on form open; no manual typing.
+  Widget _buildLocationPanel() {
+    if (_locating) {
+      return const Card(
+        child: ListTile(
+          leading: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          title: Text('Getting your location…'),
+          subtitle: Text('Using GPS so responders can find you.'),
+        ),
+      );
+    }
+    if (_locationDenied) {
+      return Card(
+        child: ListTile(
+          leading: const Icon(Icons.location_off, color: Colors.red),
+          title: const Text('Location unavailable'),
+          subtitle: const Text('Your report will be sent without coordinates.'),
+          trailing: TextButton(onPressed: _captureLocation, child: const Text('Retry')),
+        ),
+      );
+    }
+    return Card(
+      child: ListTile(
+        leading: Icon(
+          _locationReady ? Icons.my_location : Icons.location_off,
+          color: _locationReady ? Colors.teal : Colors.grey,
+        ),
+        title: Text(
+          _locationReady
+              ? '${_lat!.toStringAsFixed(6)}, ${_lng!.toStringAsFixed(6)}'
+              : 'No location',
+        ),
+        subtitle: Text(
+          _locationReady
+              ? (_accuracy != null
+                  ? 'GPS location (±${_accuracy!.toStringAsFixed(0)} m) — sent automatically'
+                  : 'GPS location — sent automatically')
+              : 'Turn on device location for GPS',
+        ),
+        trailing: _locationReady
+            ? TextButton(onPressed: _captureLocation, child: const Text('Refresh'))
+            : null,
       ),
     );
   }

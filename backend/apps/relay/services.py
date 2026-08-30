@@ -200,6 +200,8 @@ def _materialize_report(data: dict, source: str):
         description=data.get("description", ""),
         incident_type=data.get("incident_type", "OTHER"),
         people_affected=data.get("people_affected"),
+        latitude=data.get("latitude"),
+        longitude=data.get("longitude"),
     )
 
 

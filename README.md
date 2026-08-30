@@ -21,6 +21,12 @@ Multi-user emergency communication and coordination platform (3-day build, all
 > is down is buffered on-device, handed phone-to-phone over a GATT link, and
 > delivered to the server by whichever node regains connectivity — full
 > walkthrough incl. a 5-minute demo script in **`test.md`**.
+>
+> **Location is automatic.** The Get Help form captures the reporter's **current
+> GPS position** on open via `geolocator` — there are no manual lat/long fields.
+> The coordinates travel with the report whether submitted online or buffered
+> through the offline BLE mesh, and are preserved by the backend when a relayed
+> envelope is materialized.
 
 Backend: **Django + DRF + PostgreSQL** (managed via `uv`). Frontend: **Flutter**
 (Android app for citizens, web for coordinators, one codebase). AI: swappable
@@ -102,10 +108,33 @@ flutter run -d <emulator-id>
 flutter run -d chrome
 ```
 
+> **After you edit app code**, a device/emulator running an already-built APK
+> will **not** pick up your changes until you rebuild and reinstall it. To
+> rebuild the debug APK and push it to a running emulator:
+
+```bash
+cd frontend/mobile
+flutter build apk --debug
+
+# install to an emulator (replace <emulator-id> with e.g. emulator-5554)
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell monkey -p com.resqmesh.resqmesh -c android.intent.category.LAUNCHER 1
+
+# re-grant BLE permissions after a reinstall (grants reset on reinstall)
+adb shell pm grant com.resqmesh.resqmesh android.permission.BLUETOOTH_SCAN
+adb shell pm grant com.resqmesh.resqmesh android.permission.BLUETOOTH_ADVERTISE
+adb shell pm grant com.resqmesh.resqmesh android.permission.BLUETOOTH_CONNECT
+```
+
+> Alternative during active development: `flutter run -d <emulator-id>` attaches
+> the toolchain and gives you instant **hot reload** (`r` in the terminal) — no
+> rebuild/reinstall needed. Use the APK route (above) or **`test.md` §2.4** for a
+> finished build installed on both emulators prepackaged with permissions.
+
 > The Phase 3 BLE relay demo runs on **two** Android emulators
 > (`resqmesh_avd` + `resqmesh_avd_b` → `emulator-5554` / `emulator-5556`) —
-> exact launch/install/grant steps in **`test.md` §2.4**.
-```
+> exact launch/install/grant steps in **`test.md` §2.4**, and the
+> rebuild/reinstall-after-changes flow in **`test.md` §2.6**.
 
 ### Tests
 ```bash
@@ -126,6 +155,9 @@ Full step-by-step manual testing (setup, every endpoint with `curl` payloads,
 frontend flows, and a dedicated **Android emulator** walkthrough) is in
 **`test.md`**.
 
+For a narrated walkthrough that explains **every layer of the code while the
+app runs live**, see **`PRESENTATION_SCRIPT.md`**.
+
 ---
 
 ## API endpoints (v1) — prefix `http://localhost:8000/api/v1`
@@ -140,6 +172,7 @@ frontend flows, and a dedicated **Android emulator** walkthrough) is in
 | GET | `/emergencies/` | citizen/coord | List (own / all) |
 | GET | `/emergencies/{id}/` | citizen/coord | Detail incl. AI analysis (coord) |
 | PATCH | `/emergencies/{id}/` | coordinator | Update status / priority |
+| DELETE | `/emergencies/{id}/` | sender or admin | Delete a report (sender's own messages; admins/superusers any). Normal coordinators cannot delete |
 | GET | `/alerts/` | citizen/coord | Active official alerts |
 | POST | `/alerts/` | coordinator only | Create alert |
 | PATCH | `/alerts/{id}/` | coordinator only | Update / cancel alert |

@@ -33,9 +33,21 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
   ];
 
   late EmergencyReport _report;
+  String? _pendingStatus;
+  String? _pendingPriority;
   bool _saving = false;
   bool _loading = true;
   String? _error;
+
+  bool get _hasPending =>
+      _pendingStatus != null || _pendingPriority != null;
+
+  /// Deletion is only permitted for admins in the coordinator UI — a normal
+  /// coordinator cannot delete reports (the backend enforces this too).
+  bool get _deletable {
+    final user = context.read<AuthState>().currentUser;
+    return user.role == 'ADMIN';
+  }
 
   @override
   void initState() {
@@ -56,7 +68,10 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
     }
   }
 
-  Future<void> _apply({String? status, String? priority}) async {
+  /// Persist the pending status/priority selection to the backend.
+  Future<void> _save() async {
+    final status = _pendingStatus;
+    final priority = _pendingPriority;
     setState(() {
       _saving = true;
       _error = null;
@@ -67,11 +82,87 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
             status: status,
             priority: priority,
           );
-      setState(() => _report = updated);
+      if (!mounted) return;
+      setState(() {
+        _report = updated;
+        _pendingStatus = null;
+        _pendingPriority = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                'Saved RQ-${_report.id}: ${updated.status} · ${updated.priority}')),
+      );
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
       setState(() => _error = 'Update failed. Is the server reachable?');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this report?'),
+        content: Text(
+            'RQ-${_report.id} is currently ${_report.status}. Deleting it '
+            'removes it from the system permanently. This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _delete();
+  }
+
+  Future<void> _delete() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      await context
+          .read<AuthState>()
+          .api
+          .deleteReport(_report.id);
+      if (!mounted) return;
+      navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(content: Text('RQ-${_report.id} deleted.')),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      // Already gone on the server — that is the desired end state.
+      if (e.statusCode == 404) {
+        navigator.pop(context);
+        messenger.showSnackBar(
+            const SnackBar(content: Text('Report already deleted.')));
+        return;
+      }
+      setState(() => _error = e.message);
+    } catch (_) {
+      // Ambiguous network error: the delete may have reached the server even
+      // though we couldn't read the response. Return so the dashboard reloads
+      // and shows the true state, rather than leaving a misleading error.
+      if (!mounted) return;
+      navigator.pop(context);
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Delete sent — dashboard refreshing.')),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -123,10 +214,10 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
               children: _statuses.map((s) {
                 return FilterChip(
                   label: Text(s),
-                  selected: _report.status == s,
+                  selected: (_pendingStatus ?? _report.status) == s,
                   onSelected: _saving
                       ? null
-                      : (_) => _apply(status: s),
+                      : (_) => setState(() => _pendingStatus = s),
                 );
               }).toList(),
             ),
@@ -140,11 +231,38 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
                 return FilterChip(
                   label: Text(p,
                       style: TextStyle(color: priorityColor(p), fontWeight: FontWeight.bold)),
-                  selected: _report.priority == p,
-                  onSelected: _saving ? null : (_) => _apply(priority: p),
+                  selected: (_pendingPriority ?? _report.priority) == p,
+                  onSelected: _saving ? null : (_) => setState(() => _pendingPriority = p),
                 );
               }).toList(),
             ),
+            const SizedBox(height: 20),
+            if (_hasPending)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Unsaved changes: ${_pendingStatus ?? _report.status} · '
+                  '${_pendingPriority ?? _report.priority}',
+                  style: const TextStyle(color: Colors.orange, fontSize: 12),
+                ),
+              ),
+            FilledButton.icon(
+              onPressed: (_hasPending && !_saving) ? _save : null,
+              icon: const Icon(Icons.save),
+              label: const Text('SAVE CHANGES'),
+            ),
+            if (_deletable) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _saving ? null : _confirmDelete,
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                ),
+                label: const Text('DELETE REPORT'),
+              ),
+            ],
             if (_saving) const Padding(
                 padding: EdgeInsets.all(16),
                 child: Center(child: CircularProgressIndicator())),
@@ -218,7 +336,9 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
   }
 
   Future<void> _acceptSuggestion(String priority) async {
-    await _apply(priority: priority);
+    // Pre-select the AI-suggested priority so the coordinator reviews it,
+    // then presses SAVE CHANGES to persist.
+    setState(() => _pendingPriority = priority);
   }
 
   Widget _keyValue(String k, String v) {

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/emergency_report.dart';
+import '../../services/api_service.dart';
 import '../../services/auth_state.dart';
 import '../../theme.dart';
 import '../../widgets/relay_status_card.dart';
@@ -19,6 +22,15 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
   late Future<List<EmergencyReport>> _future;
   String? _statusFilter;
   String? _priorityFilter;
+
+  /// Keeps the dashboard fresh so reports created/deleted on other devices
+  /// (e.g. a citizen deleting their report) show up without a manual pull.
+  static const _refreshEvery = Duration(seconds: 15);
+  Timer? _refreshTimer;
+
+  /// True while a user-triggered refresh is in flight (shows a spinner on the
+  /// AppBar refresh button so it's clear the fetch is running).
+  bool _refreshing = false;
 
   static const _statuses = [
     'SUBMITTED',
@@ -40,13 +52,37 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
   void initState() {
     super.initState();
     _future = _load();
+    _refreshTimer = Timer.periodic(_refreshEvery, (_) => _reload());
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+    super.dispose();
   }
 
   Future<List<EmergencyReport>> _load() =>
       context.read<AuthState>().api.getReports();
 
   void _reload() {
+    if (!mounted) return;
     setState(() => _future = _load());
+  }
+
+  /// User-tapped refresh: fetch the latest list from the DB and show a spinner
+  /// on the button while it runs (the periodic timer uses [_reload] instead).
+  Future<void> _manualRefresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      final fresh = await context.read<AuthState>().api.getReports();
+      if (mounted) setState(() => _future = Future.value(fresh));
+    } catch (_) {
+      // Keep the current (possibly offline) state visible; nothing else to do.
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   Future<void> _openDetail(EmergencyReport report) async {
@@ -63,6 +99,17 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
       appBar: AppBar(
         title: const Text('ResQMesh Dashboard'),
         actions: [
+          IconButton(
+            icon: _refreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            tooltip: 'Refresh reports from database',
+            onPressed: _refreshing ? null : _manualRefresh,
+          ),
           IconButton(
             icon: const Icon(Icons.campaign),
             tooltip: 'Create official alert',
@@ -89,7 +136,18 @@ class _CoordinatorHomeScreenState extends State<CoordinatorHomeScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Could not load reports: ${snap.error}'),
+                  Icon(isNetworkError(snap.error)
+                      ? Icons.cloud_off
+                      : Icons.error_outline),
+                  const SizedBox(height: 12),
+                  const Text('No connection to the server'),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Reports carried by the mesh will still reach the server '
+                    'when the connection returns.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
                   const SizedBox(height: 8),
                   OutlinedButton(
                       onPressed: _reload, child: const Text('Retry')),

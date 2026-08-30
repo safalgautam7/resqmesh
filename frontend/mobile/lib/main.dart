@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -9,6 +11,7 @@ import 'services/api_service.dart';
 import 'services/auth_state.dart';
 import 'services/relay/relay_manager.dart';
 import 'theme.dart';
+import 'widgets/mesh_notification_listener.dart';
 
 void main() => runApp(const ResqMeshApp());
 
@@ -28,6 +31,7 @@ class _ResqMeshAppState extends State<ResqMeshApp> {
   void initState() {
     super.initState();
     _auth.addListener(_syncRelay);
+    unawaited(_auth.restoreSession());
   }
 
   @override
@@ -55,6 +59,8 @@ class _ResqMeshAppState extends State<ResqMeshApp> {
           title: 'ResQMesh',
           debugShowCheckedModeBanner: false,
           theme: buildResqTheme(),
+          builder: (context, child) =>
+              MeshNotificationListener(child: child ?? const SizedBox()),
           home: const RootGate(),
           routes: {
             '/register': (_) => const RegisterScreen(),
@@ -73,6 +79,11 @@ class RootGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
+    // Keep the restore/validation attempt out of the login gate so a reload
+    // doesn't flash a login screen before a saved session is restored.
+    if (!auth.ready) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     if (!auth.isAuthenticated) {
       return const LoginScreen();
     }

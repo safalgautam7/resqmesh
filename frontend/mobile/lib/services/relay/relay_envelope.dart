@@ -48,6 +48,17 @@ class RelayEnvelope {
 
   bool get canRelay => !expired && hops < maxHops;
 
+  /// Short human-readable description of what this envelope carries (used for
+  /// the "message received" notification). Falls back to the envelope id.
+  String get summary {
+    final report = payload['report'];
+    if (report is Map) {
+      final desc = report['description'];
+      if (desc is String && desc.isNotEmpty) return desc;
+    }
+    return id;
+  }
+
   RelayEnvelope copyWith({int? hops}) => RelayEnvelope(
         id: id,
         kind: kind,
