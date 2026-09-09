@@ -75,12 +75,6 @@ uv run python manage.py test          # 62 tests (auth / reports / alerts / agen
 uv run python manage.py check
 ```
 
-### Demo users (already in the DB)
-| username | password | role |
-|----------|----------|------|
-| `coorddemo` | `strongpass123` | COORDINATOR |
-| `smokecit` | `strongpass123` | CITIZEN |
-
 Register a fresh citizen through the app/API instead if you prefer.
 
 ### Supervisor / operational commands
